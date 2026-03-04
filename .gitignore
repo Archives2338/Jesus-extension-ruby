@@ -1,0 +1,8 @@
+# Stubs de la API — repo externo, no se sube
+stubs/
+
+# Ajustes locales de VS Code
+.vscode/
+
+# macOS
+.DS_Store

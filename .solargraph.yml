@@ -1,0 +1,10 @@
+include:
+  - "**/*.rb"
+exclude:
+  - "stubs/spec/**/*"
+  - "stubs/test/**/*"
+require_paths:
+  - "."
+  - "stubs/lib"
+require:
+  - "sketchup-api-stubs"

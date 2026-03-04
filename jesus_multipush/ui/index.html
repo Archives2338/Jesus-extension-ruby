@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jesus Multi-Push</title>
+    <style>
+        /* ── Reset mínimo ─────────────────────────────────────────── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            gap: 16px;
+            padding: 24px;
+            user-select: none;
+        }
+
+        h1 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #cba6f7;
+            letter-spacing: 0.5px;
+            text-align: center;
+        }
+
+        /* ── Control de distancia ─────────────────────────────────── */
+        .input-group {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 12px;
+            color: #a6adc8;
+        }
+
+        .row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        input[type="number"] {
+            flex: 1;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #45475a;
+            background: #313244;
+            color: #cdd6f4;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input[type="number"]:focus {
+            border-color: #cba6f7;
+        }
+
+        .unit {
+            font-size: 12px;
+            color: #6c7086;
+            min-width: 20px;
+        }
+
+        /* ── Slider ───────────────────────────────────────────────── */
+        input[type="range"] {
+            width: 100%;
+            accent-color: #cba6f7;
+            cursor: pointer;
+        }
+
+        /* ── Botón principal ──────────────────────────────────────── */
+        button#btnExtruir {
+            width: 100%;
+            padding: 10px;
+            background: #cba6f7;
+            color: #1e1e2e;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+
+        button#btnExtruir:hover {
+            opacity: 0.9;
+        }
+
+        button#btnExtruir:active {
+            transform: scale(0.97);
+        }
+
+        /* ── Feedback ─────────────────────────────────────────────── */
+        #feedback {
+            font-size: 12px;
+            color: #a6e3a1;
+            min-height: 16px;
+            text-align: center;
+            transition: color 0.3s;
+        }
+
+        #feedback.error {
+            color: #f38ba8;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>⬆ Jesus Multi-Push</h1>
+
+    <div class="input-group">
+        <label for="distancia">Distancia de extrusión</label>
+        <div class="row">
+            <input type="number" id="distancia" value="10" step="1" min="-9999" max="9999" />
+            <span class="unit">units</span>
+        </div>
+        <input type="range" id="slider" min="-200" max="200" step="1" value="10" />
+    </div>
+
+    <button id="btnExtruir">Extruir caras seleccionadas</button>
+
+    <div id="feedback"></div>
+
+    <script>
+        // ── Sincronización número ↔ slider (como un controlled component en React)
+        const inputNum = document.getElementById('distancia');
+        const slider = document.getElementById('slider');
+
+        inputNum.addEventListener('input', () => {
+            slider.value = inputNum.value;
+        });
+        slider.addEventListener('input', () => {
+            inputNum.value = slider.value;
+        });
+
+        // ── Llamada al bridge Ruby ─────────────────────────────────
+        // sketchup.ejecutar_extrusion  →  add_action_callback('ejecutar_extrusion')
+        document.getElementById('btnExtruir').addEventListener('click', () => {
+            const distancia = parseFloat(inputNum.value);
+
+            if (isNaN(distancia)) {
+                mostrarResultado({ ok: false, mensaje: 'Ingresa un número válido' });
+                return;
+            }
+
+            // La API de HtmlDialog expone window.sketchup como el puente hacia Ruby
+            window.sketchup.ejecutar_extrusion(distancia);
+        });
+
+        // ── Callback llamado DESDE Ruby via execute_script ─────────
+        // @dialog.execute_script("mostrarResultado(#{resultado.to_json})")
+        function mostrarResultado(resultado) {
+            const el = document.getElementById('feedback');
+            el.textContent = resultado.mensaje || '';
+            el.className = resultado.ok ? '' : 'error';
+        }
+
+        // Exponemos la función al scope global para que Ruby pueda llamarla
+        window.mostrarResultado = mostrarResultado;
+    </script>
+
+</body>
+
+</html>
