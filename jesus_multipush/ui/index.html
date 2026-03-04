@@ -1,182 +1,158 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Jesus Multi-Push</title>
-    <style>
-        /* ── Reset mínimo ─────────────────────────────────────────── */
-        *,
-        *::before,
-        *::after {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jesus Multi-Push</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #1e1e2e;
-            color: #cdd6f4;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            gap: 16px;
-            padding: 24px;
-            user-select: none;
-        }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1e1e2e;
+      color: #cdd6f4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 14px;
+      padding: 20px 24px;
+      user-select: none;
+    }
 
-        h1 {
-            font-size: 15px;
-            font-weight: 600;
-            color: #cba6f7;
-            letter-spacing: 0.5px;
-            text-align: center;
-        }
+    h1 { font-size: 14px; font-weight: 600; color: #cba6f7; letter-spacing: 0.5px; text-align: center; }
 
-        /* ── Control de distancia ─────────────────────────────────── */
-        .input-group {
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
+    .section-label { font-size: 11px; color: #a6adc8; text-transform: uppercase; letter-spacing: 0.8px; }
+    .mode-group, .eje-group, .input-group { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+    .mode-tabs, .eje-tabs { display: flex; gap: 6px; width: 100%; }
 
-        label {
-            font-size: 12px;
-            color: #a6adc8;
-        }
+    .mode-btn {
+      flex: 1; padding: 7px 0; border-radius: 6px;
+      border: 1px solid #45475a; background: #313244;
+      color: #6c7086; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .mode-btn:hover  { border-color: #cba6f7; color: #cdd6f4; }
+    .mode-btn.active { background: #cba6f7; border-color: #cba6f7; color: #1e1e2e; }
 
-        .row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
+    .eje-group {
+      overflow: hidden; max-height: 0; opacity: 0;
+      transition: max-height 0.2s ease, opacity 0.2s ease;
+    }
+    .eje-group.visible { max-height: 60px; opacity: 1; }
 
-        input[type="number"] {
-            flex: 1;
-            padding: 8px 12px;
-            border-radius: 6px;
-            border: 1px solid #45475a;
-            background: #313244;
-            color: #cdd6f4;
-            font-size: 14px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
+    .eje-btn {
+      flex: 1; padding: 6px 0; border-radius: 6px;
+      border: 1px solid #45475a; background: #313244;
+      color: #6c7086; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .eje-btn:hover  { border-color: #89b4fa; color: #cdd6f4; }
+    .eje-btn.active { background: #89b4fa; border-color: #89b4fa; color: #1e1e2e; }
 
-        input[type="number"]:focus {
-            border-color: #cba6f7;
-        }
+    .row { display: flex; align-items: center; gap: 8px; }
+    input[type="number"] {
+      flex: 1; padding: 8px 12px; border-radius: 6px;
+      border: 1px solid #45475a; background: #313244;
+      color: #cdd6f4; font-size: 14px; outline: none; transition: border-color 0.2s;
+    }
+    input[type="number"]:focus { border-color: #cba6f7; }
+    .unit { font-size: 12px; color: #6c7086; min-width: 24px; }
+    input[type="range"] { width: 100%; accent-color: #cba6f7; cursor: pointer; }
 
-        .unit {
-            font-size: 12px;
-            color: #6c7086;
-            min-width: 20px;
-        }
+    button#btnExtruir {
+      width: 100%; padding: 10px;
+      background: #cba6f7; color: #1e1e2e;
+      border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+    }
+    button#btnExtruir:hover  { opacity: 0.9; }
+    button#btnExtruir:active { transform: scale(0.97); }
 
-        /* ── Slider ───────────────────────────────────────────────── */
-        input[type="range"] {
-            width: 100%;
-            accent-color: #cba6f7;
-            cursor: pointer;
-        }
-
-        /* ── Botón principal ──────────────────────────────────────── */
-        button#btnExtruir {
-            width: 100%;
-            padding: 10px;
-            background: #cba6f7;
-            color: #1e1e2e;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: opacity 0.15s, transform 0.1s;
-        }
-
-        button#btnExtruir:hover {
-            opacity: 0.9;
-        }
-
-        button#btnExtruir:active {
-            transform: scale(0.97);
-        }
-
-        /* ── Feedback ─────────────────────────────────────────────── */
-        #feedback {
-            font-size: 12px;
-            color: #a6e3a1;
-            min-height: 16px;
-            text-align: center;
-            transition: color 0.3s;
-        }
-
-        #feedback.error {
-            color: #f38ba8;
-        }
-    </style>
+    #feedback { font-size: 12px; color: #a6e3a1; min-height: 16px; text-align: center; transition: color 0.3s; }
+    #feedback.error { color: #f38ba8; }
+  </style>
 </head>
-
 <body>
 
-    <h1>⬆ Jesus Multi-Push</h1>
+  <h1>&#11014; Jesus Multi-Push</h1>
 
-    <div class="input-group">
-        <label for="distancia">Distancia de extrusión</label>
-        <div class="row">
-            <input type="number" id="distancia" value="10" step="1" min="-9999" max="9999" />
-            <span class="unit">units</span>
-        </div>
-        <input type="range" id="slider" min="-200" max="200" step="1" value="10" />
+  <div class="mode-group">
+    <span class="section-label">Modo</span>
+    <div class="mode-tabs">
+      <button class="mode-btn active" data-modo="normal">Normal</button>
+      <button class="mode-btn"        data-modo="vector">Vector</button>
     </div>
+  </div>
 
-    <button id="btnExtruir">Extruir caras seleccionadas</button>
+  <div class="eje-group" id="ejeGroup">
+    <span class="section-label">Eje global</span>
+    <div class="eje-tabs">
+      <button class="eje-btn"        data-eje="x">X</button>
+      <button class="eje-btn"        data-eje="y">Y</button>
+      <button class="eje-btn active" data-eje="z">Z &#8593;</button>
+    </div>
+  </div>
 
-    <div id="feedback"></div>
+  <div class="input-group">
+    <label class="section-label" for="distancia">Distancia de extrusión</label>
+    <div class="row">
+      <input type="number" id="distancia" value="10" step="1" min="-9999" max="9999" />
+      <span class="unit">units</span>
+    </div>
+    <input type="range" id="slider" min="-200" max="200" step="1" value="10" />
+  </div>
 
-    <script>
-        // ── Sincronización número ↔ slider (como un controlled component en React)
-        const inputNum = document.getElementById('distancia');
-        const slider = document.getElementById('slider');
+  <button id="btnExtruir">Extruir caras seleccionadas</button>
+  <div id="feedback"></div>
 
-        inputNum.addEventListener('input', () => {
-            slider.value = inputNum.value;
-        });
-        slider.addEventListener('input', () => {
-            inputNum.value = slider.value;
-        });
+  <script>
+    const estado = { modo: 'normal', eje: 'z' };
 
-        // ── Llamada al bridge Ruby ─────────────────────────────────
-        // sketchup.ejecutar_extrusion  →  add_action_callback('ejecutar_extrusion')
-        document.getElementById('btnExtruir').addEventListener('click', () => {
-            const distancia = parseFloat(inputNum.value);
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        estado.modo = btn.dataset.modo;
+        document.getElementById('ejeGroup').classList.toggle('visible', estado.modo === 'vector');
+      });
+    });
 
-            if (isNaN(distancia)) {
-                mostrarResultado({ ok: false, mensaje: 'Ingresa un número válido' });
-                return;
-            }
+    document.querySelectorAll('.eje-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.eje-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        estado.eje = btn.dataset.eje;
+      });
+    });
 
-            // La API de HtmlDialog expone window.sketchup como el puente hacia Ruby
-            window.sketchup.ejecutar_extrusion(distancia);
-        });
+    const inputNum = document.getElementById('distancia');
+    const slider   = document.getElementById('slider');
+    inputNum.addEventListener('input', () => { slider.value   = inputNum.value; });
+    slider.addEventListener('input',   () => { inputNum.value = slider.value;   });
 
-        // ── Callback llamado DESDE Ruby via execute_script ─────────
-        // @dialog.execute_script("mostrarResultado(#{resultado.to_json})")
-        function mostrarResultado(resultado) {
-            const el = document.getElementById('feedback');
-            el.textContent = resultado.mensaje || '';
-            el.className = resultado.ok ? '' : 'error';
-        }
+    document.getElementById('btnExtruir').addEventListener('click', () => {
+      const distancia = parseFloat(inputNum.value);
+      if (isNaN(distancia)) {
+        mostrarResultado({ ok: false, mensaje: 'Ingresa un número válido' });
+        return;
+      }
+      window.sketchup.ejecutar_extrusion(JSON.stringify({
+        modo:      estado.modo,
+        distancia: distancia,
+        eje:       estado.eje
+      }));
+    });
 
-        // Exponemos la función al scope global para que Ruby pueda llamarla
-        window.mostrarResultado = mostrarResultado;
-    </script>
+    function mostrarResultado(resultado) {
+      const el = document.getElementById('feedback');
+      el.textContent = resultado.mensaje || '';
+      el.className   = resultado.ok ? '' : 'error';
+    }
+    window.mostrarResultado = mostrarResultado;
+  </script>
 
 </body>
-
 </html>

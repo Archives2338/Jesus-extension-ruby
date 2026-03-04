@@ -2,7 +2,7 @@ module JesusDeveloper
   module MultiPush
 
     DIALOG_WIDTH  = 360
-    DIALOG_HEIGHT = 260
+    DIALOG_HEIGHT = 360
 
     # ─────────────────────────────────────────────────────────────────────────
     # show_dialog
@@ -46,10 +46,12 @@ module JesusDeveloper
       @dialog.set_position(left, top)
 
       # ── Bridge Ruby ↔ JS ──────────────────────────────────────────────────
-      # Equivale a ipcMain.on('ejecutar_extrusion', (event, distancia) => {...})
-      @dialog.add_action_callback('ejecutar_extrusion') do |_ctx, distancia|
-        resultado = self.procesar_geometria(distancia.to_f)
-        # Devuelve feedback al frontend via sketchup.callbackName en JS
+      # JS envía: sketchup.ejecutar_extrusion(JSON.stringify({modo, distancia, eje}))
+      # Ruby recibe el string, lo parsea y enruta al modo correcto.
+      # Equivalente a: ipcMain.on('ejecutar_extrusion', (e, params) => { ... })
+      @dialog.add_action_callback('ejecutar_extrusion') do |_ctx, params_json|
+        params    = JSON.parse(params_json)
+        resultado = self.procesar_geometria(params)
         @dialog.execute_script("mostrarResultado(#{resultado.to_json})")
       end
 
@@ -60,137 +62,166 @@ module JesusDeveloper
     end
 
     # ─────────────────────────────────────────────────────────────────────────
-    # procesar_geometria(distancia)
+    # procesar_geometria(params)  — Router de modos
     #
-    #   Lógica central del Multi-Push:
-    #   1. Filtra la selección a solo Sketchup::Face.
-    #   2. Por cada cara, obtiene su vector normal (face.normal) que siempre
-    #      apunta hacia el lado "exterior" de la cara en su contexto local.
-    #   3. Llama pushpull(distancia, true):
-    #      - distancia > 0  → extrusión en sentido del normal (hacia afuera)
-    #      - distancia < 0  → intrusión (hacia adentro)
-    #      - true           → genera una nueva cara base (comportamiento JointPushPull)
+    #   Recibe un Hash con:
+    #     'modo'      → 'normal' | 'vector'
+    #     'distancia' → Float
+    #     'eje'       → 'x' | 'y' | 'z'  (solo en modo vector)
     #
-    #   Devuelve un Hash con info para el callback JS.
+    #   Delega al modo correcto. Equivale al switch/case de un Express router.
     # ─────────────────────────────────────────────────────────────────────────
-    def self.procesar_geometria(distancia)
-      model = Sketchup.active_model
+    def self.procesar_geometria(params)
+      case params['modo']
+      when 'vector' then self.modo_vector(params)
+      else               self.modo_normal(params)
+      end
+    end
 
-      # Snapshot a Array fijo ANTES de operar.
-      # Durante el pushpull la colección de la selección puede mutar (SketchUp
-      # puede agregar/quitar entidades automáticamente), así que trabajamos
-      # sobre una copia congelada, igual que harías [...arr] en JS.
-      faces = model.selection.grep(Sketchup::Face).to_a
+    # ─────────────────────────────────────────────────────────────────────────
+    # _guards(cara, idx)  — Validaciones comunes a todos los modos
+    #   Retorna String con el motivo de omisión, o nil si la cara es válida.
+    # ─────────────────────────────────────────────────────────────────────────
+    def self._guards(cara, idx)
+      return 'eliminada por operación previa'      if cara.deleted?
+      return "área ≈ 0 (#{cara.area.round(8)} u²)" if cara.area < 1e-6
+      n = cara.normal
+      return 'normal inválido'                     unless n.valid? && n.length > 1e-10
+      nil
+    end
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # _log_resumen — Imprime tabla de resumen en la Ruby Console
+    # ─────────────────────────────────────────────────────────────────────────
+    def self._log_resumen(modo, distancia, total, extruidas, omitidas, limpiezas, errores)
+      puts '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+      puts "[Jesus Multi-Push] #{modo} · #{distancia} unidades"
+      puts "  Total seleccionadas : #{total}"
+      puts "  ✅  Extruidas        : #{extruidas}"
+      puts "  ⏭   Omitidas         : #{omitidas}"
+      puts "  🧹  Limpiezas        : #{limpiezas}"
+      puts "  ⚠   Errores por cara : #{errores.length}"
+      errores.each { |err| puts "       → #{err}" }
+      puts '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+    end
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # modo_normal(params)  — MVP1: cada cara sigue su propio vector normal
+    # ─────────────────────────────────────────────────────────────────────────
+    def self.modo_normal(params)
+      distancia = params['distancia'].to_f
+      model     = Sketchup.active_model
+      faces     = model.selection.grep(Sketchup::Face).to_a
 
       if faces.empty?
         UI.messagebox('Selecciona al menos una cara antes de extruir.', MB_OK)
         return { ok: false, mensaje: 'Sin caras seleccionadas', extruidas: 0 }
       end
 
-      extruidas = 0
-      omitidas  = 0
-      limpiezas = 0
-      errores   = []   # Array de strings con detalle por cara fallida
+      extruidas, omitidas, limpiezas, errores = 0, 0, 0, []
 
-      # ── start_operation(nombre, disable_ui, add_to_undo, transparent) ─────
-      # · disable_ui = true  → congela la UI mientras opera (más rápido)
-      # · add_to_undo = true → toda la operación queda como UN SOLO paso en
-      #   el historial; el usuario deshace todo con un solo Cmd+Z.
-      model.start_operation('Jesus Multi-Push', true)
-
+      model.start_operation('Jesus Multi-Push · Normal', true)
       begin
         faces.each_with_index do |cara, idx|
           begin
-            # ── Guard 1: cara ya eliminada ─────────────────────────────────
-            # El pushpull de una cara adyacente puede haber borrado esta cara
-            # como efecto secundario de la fusión de geometría.
-            if cara.deleted?
+            if (motivo = _guards(cara, idx))
               omitidas += 1
-              puts "[Jesus Multi-Push] Cara ##{idx + 1}: eliminada por operación previa, omitida."
+              puts "[Jesus Multi-Push] Cara ##{idx + 1}: #{motivo}, omitida."
               next
             end
-
-            # ── Guard 2: área cero o degenerada ───────────────────────────
-            # Artefactos de modelado producen caras con área < 1e-6 que
-            # harían crash en pushpull.
-            if cara.area < 1e-6
-              omitidas += 1
-              puts "[Jesus Multi-Push] Cara ##{idx + 1}: área ≈ 0 (#{cara.area.round(8)} u²), omitida."
-              next
-            end
-
-            # ── Guard 3: normal inválido ───────────────────────────────────
-            # face.normal devuelve el Vector3d perpendicular a la cara,
-            # orientado hacia el lado "frontal" (exterior por convención de SU).
-            # Una cara degenerada puede devolver un vector de longitud 0.
-            normal = cara.normal
-            unless normal.valid? && normal.length > 1e-10
-              omitidas += 1
-              puts "[Jesus Multi-Push] Cara ##{idx + 1}: normal inválido, omitida."
-              next
-            end
-
-            # ── Extrusión con vector normal propio ────────────────────────
-            # pushpull(distancia, create_face):
-            #   · El signo de distancia controla la dirección:
-            #       distancia > 0 → extrusión hacia afuera (sentido del normal)
-            #       distancia < 0 → intrusión hacia adentro (sentido inverso)
-            #   · create_face = true → siempre genera una cara base nueva en
-            #     el origen, replicando el comportamiento de JointPushPull.
-            #   · Cada cara usa SU PROPIO normal local, por eso funciona
-            #     correctamente aunque las caras apunten en distintas
-            #     direcciones (ej: techo + paredes seleccionados a la vez).
             cara.pushpull(distancia, true)
             extruidas += 1
-
-            # ── Limpieza de geometría ─────────────────────────────────────
-            # Tras el pushpull, la cara original "viaja" al extremo del sólido.
-            # En casos degenerados (distancia = 0 o cara coplanar con otra)
-            # puede quedar como residuo de área ≈ 0 sin referencias útiles.
-            # Lo borramos para mantener el modelo limpio.
             if !cara.deleted? && cara.area < 1e-6
               cara.erase!
               limpiezas += 1
-              puts "[Jesus Multi-Push] Cara ##{idx + 1}: residuo de área cero eliminado tras extrusión."
             end
-
           rescue StandardError => e
-            # Error aislado por cara: lo registramos y continuamos con las
-            # demás en lugar de abortar toda la operación.
             errores << "Cara ##{idx + 1}: #{e.message}"
             puts "[Jesus Multi-Push] ⚠  Error en cara ##{idx + 1}: #{e.message}"
           end
         end
-
         model.commit_operation
-
-        # ── Resumen detallado en Ruby Console ─────────────────────────────
-        puts '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
-        puts "[Jesus Multi-Push] Operación completada · #{distancia} unidades"
-        puts "  Total seleccionadas : #{faces.length}"
-        puts "  ✅  Extruidas        : #{extruidas}"
-        puts "  ⏭   Omitidas         : #{omitidas}"
-        puts "  🧹  Limpiezas        : #{limpiezas}"
-        puts "  ⚠   Errores por cara : #{errores.length}"
-        errores.each { |err| puts "       → #{err}" }
-        puts '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
-
-        resumen = errores.empty? \
-          ? "#{extruidas} cara(s) extruida(s)" \
-          : "#{extruidas} extruida(s), #{errores.length} error(es)"
-
-        { ok: true, mensaje: resumen, extruidas: extruidas,
-          omitidas: omitidas, limpiezas: limpiezas, errores: errores }
-
+        _log_resumen('Normal', distancia, faces.length, extruidas, omitidas, limpiezas, errores)
+        resumen = errores.empty? ? "#{extruidas} cara(s) extruida(s)" : "#{extruidas} extruida(s), #{errores.length} error(es)"
+        { ok: true, mensaje: resumen, extruidas: extruidas, omitidas: omitidas }
       rescue StandardError => e
-        # Error crítico: revertimos TODO con abort_operation.
-        # El historial de Undo no registra nada — el modelo queda intacto.
         model.abort_operation
-        puts "[Jesus Multi-Push] 🔴 ERROR CRÍTICO — operación revertida: #{e.message}"
-        UI.messagebox(
-          "Error crítico:\n#{e.message}\n\nTodos los cambios fueron revertidos.\n(Undo sigue disponible para operaciones previas)",
-          MB_OK
-        )
+        puts "[Jesus Multi-Push] 🔴 ERROR CRÍTICO: #{e.message}"
+        UI.messagebox("Error crítico:\n#{e.message}\n\nCambios revertidos.", MB_OK)
+        { ok: false, mensaje: "Error crítico: #{e.message}", extruidas: 0 }
+      end
+    end
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # modo_vector(params)  — MVP2: todas las caras se empujan en un eje global
+    #
+    #   Matemática con producto punto:
+    #   pushpull siempre mueve ALONG face.normal. Para que el desplazamiento
+    #   real en la dirección del vector global sea igual a `distancia`:
+    #
+    #       distancia_real = distancia / dot(face.normal, vector_global)
+    #
+    #   · dot ≈ 0  → cara perpendicular al eje → imposible proyectar → omitir
+    #   · dot < 0  → normal apunta opuesto al eje → distancia_real negativa
+    #                → pushpull va en -normal → resultado correcto ✓
+    # ─────────────────────────────────────────────────────────────────────────
+    def self.modo_vector(params)
+      distancia = params['distancia'].to_f
+      eje       = params['eje'] || 'z'
+      model     = Sketchup.active_model
+      faces     = model.selection.grep(Sketchup::Face).to_a
+
+      if faces.empty?
+        UI.messagebox('Selecciona al menos una cara antes de extruir.', MB_OK)
+        return { ok: false, mensaje: 'Sin caras seleccionadas', extruidas: 0 }
+      end
+
+      vector_global = case eje
+                      when 'x' then Geom::Vector3d.new(1, 0, 0)
+                      when 'y' then Geom::Vector3d.new(0, 1, 0)
+                      else          Geom::Vector3d.new(0, 0, 1)  # 'z' por defecto
+                      end
+
+      extruidas, omitidas, limpiezas, errores = 0, 0, 0, []
+
+      model.start_operation("Jesus Multi-Push · Vector #{eje.upcase}", true)
+      begin
+        faces.each_with_index do |cara, idx|
+          begin
+            if (motivo = _guards(cara, idx))
+              omitidas += 1
+              puts "[Jesus Multi-Push] Cara ##{idx + 1}: #{motivo}, omitida."
+              next
+            end
+
+            dot = cara.normal.dot(vector_global)
+
+            if dot.abs < 0.01
+              omitidas += 1
+              puts "[Jesus Multi-Push] Cara ##{idx + 1}: perpendicular al eje #{eje.upcase} (dot=#{dot.round(4)}), omitida."
+              next
+            end
+
+            cara.pushpull(distancia / dot, true)
+            extruidas += 1
+
+            if !cara.deleted? && cara.area < 1e-6
+              cara.erase!
+              limpiezas += 1
+            end
+          rescue StandardError => e
+            errores << "Cara ##{idx + 1}: #{e.message}"
+            puts "[Jesus Multi-Push] ⚠  Error en cara ##{idx + 1}: #{e.message}"
+          end
+        end
+        model.commit_operation
+        _log_resumen("Vector #{eje.upcase}", distancia, faces.length, extruidas, omitidas, limpiezas, errores)
+        resumen = errores.empty? ? "#{extruidas} cara(s) → eje #{eje.upcase}" : "#{extruidas} extruida(s), #{errores.length} error(es)"
+        { ok: true, mensaje: resumen, extruidas: extruidas, omitidas: omitidas }
+      rescue StandardError => e
+        model.abort_operation
+        puts "[Jesus Multi-Push] 🔴 ERROR CRÍTICO: #{e.message}"
+        UI.messagebox("Error crítico:\n#{e.message}\n\nCambios revertidos.", MB_OK)
         { ok: false, mensaje: "Error crítico: #{e.message}", extruidas: 0 }
       end
     end
